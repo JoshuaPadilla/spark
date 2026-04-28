@@ -103,4 +103,27 @@ describe('MqttService', () => {
       }),
     );
   });
+
+  it('tracks a fresh activation request until the device reports the port active', () => {
+    service.sendNewSession(1, 60000);
+
+    expect(service.isActivationTransitionInProgress(1)).toBe(true);
+
+    (
+      service as unknown as {
+        handleMessage: (topic: string, payload: Buffer) => void;
+      }
+    ).handleMessage(
+      'device/status',
+      Buffer.from(
+        JSON.stringify({
+          p1_active: true,
+          p1_remaining: 60000,
+          p2_active: false,
+        }),
+      ),
+    );
+
+    expect(service.isActivationTransitionInProgress(1)).toBe(false);
+  });
 });

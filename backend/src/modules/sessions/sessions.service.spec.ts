@@ -15,6 +15,7 @@ describe('SessionsService', () => {
   };
   let mqttService: {
     getPortStatus: jest.Mock;
+    isActivationTransitionInProgress: jest.Mock;
     isPauseTransitionInProgress: jest.Mock;
     sendNewSession: jest.Mock;
     sendPause: jest.Mock;
@@ -32,6 +33,7 @@ describe('SessionsService', () => {
     };
     mqttService = {
       getPortStatus: jest.fn(),
+      isActivationTransitionInProgress: jest.fn().mockReturnValue(false),
       isPauseTransitionInProgress: jest.fn().mockReturnValue(false),
       sendNewSession: jest.fn(),
       sendPause: jest.fn(),
@@ -91,6 +93,27 @@ describe('SessionsService', () => {
       statusReceived: true,
     });
     mqttService.isPauseTransitionInProgress.mockReturnValue(true);
+    userService.findById.mockResolvedValue({
+      activePort: 1,
+      id: 'user-1',
+    });
+
+    await service.getStatus('user-1');
+
+    expect(userService.clearCompletedSession).not.toHaveBeenCalled();
+  });
+
+  it('does not clear a session while activation is still settling', async () => {
+    mqttService.getPortStatus.mockReturnValue({
+      availableCount: 2,
+      availablePorts: [1, 2],
+      brokerConnected: true,
+      deviceOnline: true,
+      p1_active: false,
+      p2_active: false,
+      statusReceived: true,
+    });
+    mqttService.isActivationTransitionInProgress.mockReturnValue(true);
     userService.findById.mockResolvedValue({
       activePort: 1,
       id: 'user-1',

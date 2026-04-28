@@ -23,6 +23,7 @@ export interface PortStatus {
 
 const DEVICE_STATUS_TTL_MS = 6500;
 const PAUSE_TRANSITION_TTL_MS = 8000;
+const ACTIVATION_TRANSITION_TTL_MS = 8000;
 
 type CardScannedHandler = (cardUid: string) => Promise<void> | void;
 type DevicePortSelectedHandler = (
@@ -45,6 +46,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     new Set<DevicePortSelectedHandler>();
   private readonly portPausedHandlers = new Set<PortPausedHandler>();
   private readonly portCompletedHandlers = new Set<PortCompletedHandler>();
+  private readonly activationRequestedPorts = new Map<number, number>();
   private readonly pauseRequestedPorts = new Map<number, number>();
   private readonly recentlyPausedPorts = new Map<number, number>();
   private portStatus: PortStatus = {
@@ -145,8 +147,14 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       this.portStatus.statusReceived &&
       statusAgeMs !== undefined &&
       statusAgeMs <= DEVICE_STATUS_TTL_MS;
-    const p1PauseRequested = this.hasFreshTransition(this.pauseRequestedPorts, 1);
-    const p2PauseRequested = this.hasFreshTransition(this.pauseRequestedPorts, 2);
+    const p1PauseRequested = this.hasFreshTransition(
+      this.pauseRequestedPorts,
+      1,
+    );
+    const p2PauseRequested = this.hasFreshTransition(
+      this.pauseRequestedPorts,
+      2,
+    );
     const p1Remaining = this.getAdjustedRemaining(
       this.portStatus.p1_active,
       this.portStatus.p1_remaining,
@@ -196,6 +204,10 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       this.hasFreshTransition(this.pauseRequestedPorts, port) ||
       this.hasFreshTransition(this.recentlyPausedPorts, port)
     );
+  }
+
+  isActivationTransitionInProgress(port: number) {
+    return this.hasFreshTransition(this.activationRequestedPorts, port);
   }
 
   private handleMessage(topic: string, payload: Buffer) {
@@ -250,6 +262,14 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         nextStatus.availableCount = nextStatus.availablePorts.length;
         this.portStatus = nextStatus;
 
+        if (nextStatus.p1_active) {
+          this.clearActivationTransition(1);
+        }
+
+        if (nextStatus.p2_active) {
+          this.clearActivationTransition(2);
+        }
+
         this.handlePortStateTransition(previousStatus, nextStatus, 1);
         this.handlePortStateTransition(previousStatus, nextStatus, 2);
         return;
@@ -263,6 +283,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
+        this.clearActivationTransition(port);
         this.pauseRequestedPorts.delete(port);
         this.markRecentlyPaused(port);
 
@@ -371,6 +392,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
   sendNewSession(port: number, timeMs: number): void {
     this.clearPauseTransitions(port);
+    this.markActivationRequested(port);
     this.publish('device/command', {
       cmd: 'new-session',
       port,
@@ -380,6 +402,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   }
 
   sendPause(port: number): void {
+    this.clearActivationTransition(port);
     this.markPauseRequested(port);
     this.publish('device/command', { cmd: 'pause', port });
     this.logger.log(`Sent pause to port ${port}`);
@@ -387,6 +410,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
   sendResume(port: number, remainingMs: number): void {
     this.clearPauseTransitions(port);
+    this.markActivationRequested(port);
     this.publish('device/command', {
       cmd: 'resume',
       port,
@@ -463,6 +487,17 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   private clearPauseTransitions(port: number) {
     this.pauseRequestedPorts.delete(port);
     this.recentlyPausedPorts.delete(port);
+  }
+
+  private clearActivationTransition(port: number) {
+    this.activationRequestedPorts.delete(port);
+  }
+
+  private markActivationRequested(port: number) {
+    this.activationRequestedPorts.set(
+      port,
+      Date.now() + ACTIVATION_TRANSITION_TTL_MS,
+    );
   }
 
   private markPauseRequested(port: number) {

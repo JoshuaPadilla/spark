@@ -560,6 +560,10 @@ export class SessionsService implements OnModuleInit {
       return;
     }
 
+    if (this.mqttService.isActivationTransitionInProgress(activePort)) {
+      return;
+    }
+
     if (this.mqttService.isPauseTransitionInProgress(activePort)) {
       return;
     }
