@@ -22,6 +22,7 @@ export interface PortStatus {
 }
 
 const DEVICE_STATUS_TTL_MS = 6500;
+const PAUSE_TRANSITION_TTL_MS = 8000;
 
 type CardScannedHandler = (cardUid: string) => Promise<void> | void;
 type DevicePortSelectedHandler = (
@@ -44,7 +45,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     new Set<DevicePortSelectedHandler>();
   private readonly portPausedHandlers = new Set<PortPausedHandler>();
   private readonly portCompletedHandlers = new Set<PortCompletedHandler>();
-  private readonly recentlyPausedPorts = new Set<number>();
+  private readonly pauseRequestedPorts = new Map<number, number>();
+  private readonly recentlyPausedPorts = new Map<number, number>();
   private portStatus: PortStatus = {
     p1_active: false,
     p2_active: false,
@@ -143,19 +145,30 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       this.portStatus.statusReceived &&
       statusAgeMs !== undefined &&
       statusAgeMs <= DEVICE_STATUS_TTL_MS;
+    const p1PauseRequested = this.hasFreshTransition(this.pauseRequestedPorts, 1);
+    const p2PauseRequested = this.hasFreshTransition(this.pauseRequestedPorts, 2);
+    const p1Remaining = this.getAdjustedRemaining(
+      this.portStatus.p1_active,
+      this.portStatus.p1_remaining,
+      statusAgeMs,
+    );
+    const p2Remaining = this.getAdjustedRemaining(
+      this.portStatus.p2_active,
+      this.portStatus.p2_remaining,
+      statusAgeMs,
+    );
+    const p1Active = p1PauseRequested ? false : this.portStatus.p1_active;
+    const p2Active = p2PauseRequested ? false : this.portStatus.p2_active;
+    const availablePorts = this.getAvailablePorts(p1Active, p2Active);
 
     return {
       ...this.portStatus,
-      p1_remaining: this.getAdjustedRemaining(
-        this.portStatus.p1_active,
-        this.portStatus.p1_remaining,
-        statusAgeMs,
-      ),
-      p2_remaining: this.getAdjustedRemaining(
-        this.portStatus.p2_active,
-        this.portStatus.p2_remaining,
-        statusAgeMs,
-      ),
+      p1_active: p1Active,
+      p2_active: p2Active,
+      p1_remaining: p1Remaining,
+      p2_remaining: p2Remaining,
+      availablePorts,
+      availableCount: availablePorts.length,
       brokerConnected,
       deviceOnline: brokerConnected && statusFresh,
       statusAgeMs,
@@ -176,6 +189,13 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
   onPortCompleted(handler: PortCompletedHandler) {
     this.portCompletedHandlers.add(handler);
+  }
+
+  isPauseTransitionInProgress(port: number) {
+    return (
+      this.hasFreshTransition(this.pauseRequestedPorts, port) ||
+      this.hasFreshTransition(this.recentlyPausedPorts, port)
+    );
   }
 
   private handleMessage(topic: string, payload: Buffer) {
@@ -243,7 +263,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           return;
         }
 
-        this.recentlyPausedPorts.add(port);
+        this.pauseRequestedPorts.delete(port);
+        this.markRecentlyPaused(port);
 
         if (port === 1) {
           this.portStatus = {
@@ -349,6 +370,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   }
 
   sendNewSession(port: number, timeMs: number): void {
+    this.clearPauseTransitions(port);
     this.publish('device/command', {
       cmd: 'new-session',
       port,
@@ -358,11 +380,13 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   }
 
   sendPause(port: number): void {
+    this.markPauseRequested(port);
     this.publish('device/command', { cmd: 'pause', port });
     this.logger.log(`Sent pause to port ${port}`);
   }
 
   sendResume(port: number, remainingMs: number): void {
+    this.clearPauseTransitions(port);
     this.publish('device/command', {
       cmd: 'resume',
       port,
@@ -418,11 +442,61 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (this.recentlyPausedPorts.delete(port)) {
+    const remainingMs =
+      port === 1 ? previousStatus.p1_remaining : previousStatus.p2_remaining;
+
+    if (this.consumeFreshTransition(this.pauseRequestedPorts, port)) {
+      this.markRecentlyPaused(port);
+      if (remainingMs !== undefined) {
+        this.notifyPortPaused(port, remainingMs);
+      }
+      return;
+    }
+
+    if (this.consumeFreshTransition(this.recentlyPausedPorts, port)) {
       return;
     }
 
     this.notifyPortCompleted(port);
+  }
+
+  private clearPauseTransitions(port: number) {
+    this.pauseRequestedPorts.delete(port);
+    this.recentlyPausedPorts.delete(port);
+  }
+
+  private markPauseRequested(port: number) {
+    this.pauseRequestedPorts.set(port, Date.now() + PAUSE_TRANSITION_TTL_MS);
+  }
+
+  private markRecentlyPaused(port: number) {
+    this.recentlyPausedPorts.set(port, Date.now() + PAUSE_TRANSITION_TTL_MS);
+  }
+
+  private hasFreshTransition(transitions: Map<number, number>, port: number) {
+    const expiresAt = transitions.get(port);
+    if (expiresAt === undefined) {
+      return false;
+    }
+
+    if (expiresAt <= Date.now()) {
+      transitions.delete(port);
+      return false;
+    }
+
+    return true;
+  }
+
+  private consumeFreshTransition(
+    transitions: Map<number, number>,
+    port: number,
+  ) {
+    if (!this.hasFreshTransition(transitions, port)) {
+      return false;
+    }
+
+    transitions.delete(port);
+    return true;
   }
 
   private notifyCardScanned(cardUid: string) {

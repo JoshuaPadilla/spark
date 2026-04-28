@@ -157,11 +157,6 @@ function DashboardPage() {
   const handleStartSession = async () => {
     if (!token || !user) return
 
-    if (!user.cardUid) {
-      setActionError('Link your RFID card before starting a session.')
-      return
-    }
-
     if (user.activePort === 1 || user.activePort === 2) {
       setActionError(
         `Pause or finish your active session on Port ${user.activePort} first.`,
@@ -406,9 +401,10 @@ function DashboardPage() {
                 {user.cardUid ?? 'No card linked yet'}
               </p>
               <p className="text-sm text-gray-500 mt-1">
-                Link the card UID that you will tap on the charging device. If
-                you tap without picking a port in the dashboard, the charger
-                buttons will let you choose a port directly.
+                Link the card UID you will use only for device-initiated
+                sessions. Dashboard starts and resumes use your logged-in
+                balance directly, while card taps on the charger let you pick a
+                port from the device itself.
               </p>
             </div>
             <span
@@ -630,8 +626,7 @@ function DashboardPage() {
                 !isActive &&
                 !hasBlockingSessionState &&
                 !hasSavedTime &&
-                isDeviceReady &&
-                !!user.cardUid
+                isDeviceReady
               const canSelectHere = canStartHere || canResumeHere
               const isQueuedHere = isAwaitingCard && user.pendingPort === port
               const portActionLabel = canResumeHere
@@ -695,19 +690,17 @@ function DashboardPage() {
                             ? 'Connect to this port, choose time, and pay with balance.'
                             : canResumeHere
                               ? 'Resume your saved time immediately on this port.'
-                              : !user.cardUid && !hasSavedTime
-                                ? 'Link a card UID before starting.'
-                                : !portStatus.brokerConnected
-                                  ? 'MQTT broker is offline.'
-                                  : !isDeviceReady
-                                    ? 'Waiting for a fresh MQTT status update.'
-                                    : hasSavedTime
-                                      ? 'Saved time is ready. Select an available port to resume.'
-                                      : isAwaitingCard
-                                        ? 'Card tap is pending. Select another free port to replace the queued start request.'
-                                        : activePort !== 0
-                                          ? 'Finish or pause your current session first.'
-                                          : 'Port is available.'}
+                              : !portStatus.brokerConnected
+                                ? 'MQTT broker is offline.'
+                                : !isDeviceReady
+                                  ? 'Waiting for a fresh MQTT status update.'
+                                  : hasSavedTime
+                                    ? 'Saved time is ready. Select an available port to resume.'
+                                    : isAwaitingCard
+                                      ? 'Card tap is pending. Select another free port to replace the queued start request.'
+                                      : activePort !== 0
+                                        ? 'Finish or pause your current session first.'
+                                        : 'Port is available.'}
                         </p>
                       </>
                     )}
@@ -767,9 +760,9 @@ function DashboardPage() {
               Choose Plan — Port {sessionModal.port}
             </h3>
             <p className="text-sm text-gray-400 mb-5">
-              Pick a price and charging time. Your wallet is charged only after
-              your linked RFID card is accepted by the device. Resume does not
-              require another card tap.
+              Pick a price and charging time. Starting from the dashboard uses
+              your wallet balance immediately and starts the selected port
+              without another card tap.
             </p>
 
             <p className="text-sm text-gray-400 mb-5">
@@ -857,7 +850,7 @@ function DashboardPage() {
                 className="flex-1 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-gray-900 py-2.5 rounded-lg text-sm font-semibold transition-colors"
               >
                 {actionLoading
-                  ? 'Queueing…'
+                  ? 'Starting…'
                   : `Use ${formatPeso(selectedDuration.cost)} Balance`}
               </button>
             </div>

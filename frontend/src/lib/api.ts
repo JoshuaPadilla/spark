@@ -1,6 +1,6 @@
 const API_URL =
   (import.meta.env.VITE_API_URL as string | undefined) ??
-  'http://localhost:3010'
+  'http://198.96.88.142:3010'
 
 export interface User {
   id: string

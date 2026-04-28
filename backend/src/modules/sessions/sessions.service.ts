@@ -63,27 +63,28 @@ export class SessionsService implements OnModuleInit {
     }
 
     const user = await this.userService.findById(userId);
-    this.assertCardLinked(user.cardUid);
     this.assertNoActiveSession(user.activePort);
     this.assertNoSavedTimeConflict(user.timeRemaining);
     this.assertSufficientBalance(user.balance, cost);
     const status = this.assertDeviceReady();
     this.assertPortAvailable(status.availablePorts, port);
 
-    await this.userService.setPendingSession(userId, {
-      action: 'start',
+    const durationMs = minutes * 60 * 1000;
+    await this.userService.deductBalance(userId, cost);
+    this.mqttService.sendNewSession(port, durationMs);
+    await this.userService.markSessionActive(
+      userId,
       port,
-      durationMs: minutes * 60 * 1000,
-      message: `Tap your linked RFID card to start Port ${port}.`,
-    });
+      `Charging started on Port ${port}.`,
+    );
 
     return {
       success: true,
-      pending: true,
+      pending: false,
       port,
       minutes,
       cost,
-      message: `Tap your linked RFID card to start Port ${port}.`,
+      message: `Charging started on Port ${port}.`,
     };
   }
 
@@ -93,9 +94,20 @@ export class SessionsService implements OnModuleInit {
     await this.assertPauseOwnership(userId, port);
     const status = this.assertDeviceReady();
     this.assertPortBusy(status.availablePorts, port);
+    const remainingMs = port === 1 ? status.p1_remaining : status.p2_remaining;
 
     this.mqttService.sendPause(port);
-    return { success: true, port };
+
+    if (remainingMs !== undefined) {
+      await this.userService.savePausedSession(
+        userId,
+        port,
+        remainingMs,
+        `Port ${port} paused. ${this.formatDuration(remainingMs)} saved for resume.`,
+      );
+    }
+
+    return { success: true, port, remainingMs };
   }
 
   async resumeSession(userId: string, port: number) {
@@ -413,7 +425,9 @@ export class SessionsService implements OnModuleInit {
   private async handlePortPaused(port: number, remainingMs: number) {
     const user = await this.userService.findByActivePort(port);
     if (!user) {
-      this.logger.debug(`Pause event for port ${port} has no active owner`);
+      if (!this.mqttService.isPauseTransitionInProgress(port)) {
+        this.logger.debug(`Pause event for port ${port} has no active owner`);
+      }
       return;
     }
 
@@ -440,14 +454,6 @@ export class SessionsService implements OnModuleInit {
   private assertValidPort(port: number) {
     if (port !== 1 && port !== 2) {
       throw new BadRequestException('Invalid port. Must be 1 or 2');
-    }
-  }
-
-  private assertCardLinked(cardUid: string | null) {
-    if (!cardUid) {
-      throw new BadRequestException(
-        'Link your card UID before starting a session',
-      );
     }
   }
 
@@ -551,6 +557,10 @@ export class SessionsService implements OnModuleInit {
 
     const portIsActive = activePort === 1 ? status.p1_active : status.p2_active;
     if (portIsActive) {
+      return;
+    }
+
+    if (this.mqttService.isPauseTransitionInProgress(activePort)) {
       return;
     }
 
