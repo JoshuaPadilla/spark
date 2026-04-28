@@ -16,7 +16,7 @@ const config = defineConfig({
   ],
   server: {
     host: '0.0.0.0', // CRITICAL: Allows the VPS to accept outside connections
-    port: 3000, // Make sure this matches the port you're trying to open
+    port: 3011, // Make sure this matches the port you're trying to open
     strictPort: true, // Prevents Vite from switching to 3001 if 3000 is busy
   },
 })
