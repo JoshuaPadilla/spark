@@ -63,7 +63,7 @@ export class SessionsService implements OnModuleInit {
     }
 
     const user = await this.userService.findById(userId);
-  this.assertCanClaimPort(user.activePort, port);
+    this.assertCanClaimPort(user.activePort, port);
     this.assertNoSavedTimeConflict(user.timeRemaining);
     this.assertSufficientBalance(user.balance, cost);
     const status = this.assertDeviceReady();
@@ -325,10 +325,7 @@ export class SessionsService implements OnModuleInit {
     }
 
     if (this.userOwnsPort(user.activePort, port)) {
-      this.mqttService.sendDeviceMessage(
-        'SESSION ACTIVE',
-        `PORT ${port}`,
-      );
+      this.mqttService.sendDeviceMessage('SESSION ACTIVE', `PORT ${port}`);
       return;
     }
 

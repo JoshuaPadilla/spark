@@ -178,7 +178,8 @@ export class UserService {
     const user = await this.findById(userId);
     user.activePort = this.removePortFromMask(user.activePort, port);
     user.lastPortConnected = port;
-    user.timeRemaining = Math.max(0, user.timeRemaining) + Math.max(0, remainingMs);
+    user.timeRemaining =
+      Math.max(0, user.timeRemaining) + Math.max(0, remainingMs);
     user.pendingAction = null;
     user.pendingPort = 0;
     user.pendingDurationMs = 0;

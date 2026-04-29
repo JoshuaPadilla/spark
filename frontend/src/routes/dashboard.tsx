@@ -253,9 +253,7 @@ function DashboardPage() {
     if (!token || !user) return
 
     if (userOwnsPort(user.activePort, port)) {
-      setActionError(
-        `You already have an active session on Port ${port}.`,
-      )
+      setActionError(`You already have an active session on Port ${port}.`)
       return
     }
 
@@ -592,7 +590,9 @@ function DashboardPage() {
                     Connected to Port {port}
                   </h2>
                   <p className="mt-3 text-2xl font-mono font-semibold text-emerald-200">
-                    {remaining !== undefined ? formatMs(remaining) : 'Syncing timer...'}
+                    {remaining !== undefined
+                      ? formatMs(remaining)
+                      : 'Syncing timer...'}
                   </p>
                   <p className="mt-2 text-sm text-gray-400">
                     This port is assigned to your account right now. Pause it
@@ -639,15 +639,9 @@ function DashboardPage() {
               )
               const isMyActivePort = activePorts.includes(port)
               const canResumeHere =
-                !isActive &&
-                !isMyActivePort &&
-                hasSavedTime &&
-                isDeviceReady
+                !isActive && !isMyActivePort && hasSavedTime && isDeviceReady
               const canStartHere =
-                !isActive &&
-                !isMyActivePort &&
-                !hasSavedTime &&
-                isDeviceReady
+                !isActive && !isMyActivePort && !hasSavedTime && isDeviceReady
               const canSelectHere = canStartHere || canResumeHere
               const isQueuedHere = isAwaitingCard && user.pendingPort === port
               const portActionLabel = canResumeHere
@@ -723,7 +717,7 @@ function DashboardPage() {
                                         ? 'This port is already assigned to your account.'
                                         : ownsBothPorts
                                           ? 'You already occupy both charging ports.'
-                                        : 'Port is available.'}
+                                          : 'Port is available.'}
                         </p>
                       </>
                     )}
