@@ -37,8 +37,11 @@ export class SessionsController {
 
   @UseGuards(JwtAuthGuard)
   @Post('pause')
-  pauseSession(@Req() req: { user: { id: string } }) {
-    return this.sessionsService.pauseSession(req.user.id);
+  pauseSession(
+    @Req() req: { user: { id: string } },
+    @Body() dto: PortActionDto,
+  ) {
+    return this.sessionsService.pauseSession(req.user.id, dto.port);
   }
 
   @UseGuards(JwtAuthGuard)

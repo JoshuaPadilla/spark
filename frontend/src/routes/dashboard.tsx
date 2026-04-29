@@ -33,6 +33,25 @@ function formatPeso(amount: number) {
   return currencyFormatter.format(amount)
 }
 
+function getOwnedPorts(activePort: number | undefined): Array<1 | 2> {
+  const ports: Array<1 | 2> = []
+  const activeMask = activePort ?? 0
+
+  if ((activeMask & 1) !== 0) {
+    ports.push(1)
+  }
+
+  if ((activeMask & 2) !== 0) {
+    ports.push(2)
+  }
+
+  return ports
+}
+
+function userOwnsPort(activePort: number | undefined, port: 1 | 2) {
+  return ((activePort ?? 0) & port) !== 0
+}
+
 function getLiveRemainingMs(
   remainingMs: number | undefined,
   isActive: boolean,
@@ -142,8 +161,7 @@ function DashboardPage() {
     }
   }, [])
 
-  const activePort =
-    user?.activePort === 1 || user?.activePort === 2 ? user.activePort : 0
+  const activePorts = getOwnedPorts(user?.activePort)
   const hasSavedTime = (user?.timeRemaining ?? 0) > 0
   const isAwaitingCard =
     user?.pendingAction === 'start' &&
@@ -157,9 +175,9 @@ function DashboardPage() {
   const handleStartSession = async () => {
     if (!token || !user) return
 
-    if (user.activePort === 1 || user.activePort === 2) {
+    if (userOwnsPort(user.activePort, sessionModal.port)) {
       setActionError(
-        `Pause or finish your active session on Port ${user.activePort} first.`,
+        `You already have an active session on Port ${sessionModal.port}.`,
       )
       return
     }
@@ -217,12 +235,12 @@ function DashboardPage() {
     }
   }
 
-  const handlePause = async () => {
+  const handlePause = async (port: 1 | 2) => {
     if (!token) return
     setActionError('')
     setActionLoading(true)
     try {
-      await api.sessions.pause(token)
+      await api.sessions.pause(token, port)
       await syncDashboard()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Failed to pause session')
@@ -234,9 +252,9 @@ function DashboardPage() {
   const handleResume = async (port: 1 | 2) => {
     if (!token || !user) return
 
-    if (user.activePort === 1 || user.activePort === 2) {
+    if (userOwnsPort(user.activePort, port)) {
       setActionError(
-        `Pause or finish your active session on Port ${user.activePort} first.`,
+        `You already have an active session on Port ${port}.`,
       )
       return
     }
@@ -305,21 +323,13 @@ function DashboardPage() {
     return null
   }
 
-  const hasBlockingSessionState = activePort !== 0
+  const hasActivePorts = activePorts.length > 0
+  const ownsBothPorts = activePorts.length === 2
   const selectedDuration =
     DURATIONS.find((option) => option.minutes === sessionModal.minutes) ??
     DURATIONS[0]
   const canAffordSelectedDuration = user.balance >= selectedDuration.cost
   const statusAgeLabel = formatStatusAge(portStatus.statusAgeMs)
-  const activePortRemaining =
-    activePort === 0
-      ? undefined
-      : getLiveRemainingMs(
-          activePort === 1 ? portStatus.p1_remaining : portStatus.p2_remaining,
-          true,
-          statusSyncedAtMs,
-          nowMs,
-        )
   const mqttStatusLabel = !portStatus.brokerConnected
     ? 'MQTT Offline'
     : isDeviceReady
@@ -545,7 +555,7 @@ function DashboardPage() {
         {(user.pendingMessage ||
           actionError ||
           isAwaitingCard ||
-          activePort !== 0 ||
+          hasActivePorts ||
           hasSavedTime) && (
           <div className="space-y-3">
             {user.pendingMessage && (
@@ -562,27 +572,38 @@ function DashboardPage() {
               </div>
             )}
 
-            {activePort !== 0 && (
-              <div className="bg-gray-900 border border-emerald-400/30 rounded-2xl p-5">
-                <p className="text-xs font-medium uppercase tracking-wider text-emerald-300">
-                  Current Connection
-                </p>
-                <h2 className="mt-2 text-xl font-semibold text-white">
-                  Connected to Port {activePort}
-                </h2>
-                <p className="mt-3 text-2xl font-mono font-semibold text-emerald-200">
-                  {activePortRemaining !== undefined
-                    ? formatMs(activePortRemaining)
-                    : 'Syncing timer...'}
-                </p>
-                <p className="mt-2 text-sm text-gray-400">
-                  This is your live charging port. Pause it here if you want to
-                  save the remaining time and move later.
-                </p>
-              </div>
-            )}
+            {activePorts.map((port) => {
+              const remaining = getLiveRemainingMs(
+                port === 1 ? portStatus.p1_remaining : portStatus.p2_remaining,
+                true,
+                statusSyncedAtMs,
+                nowMs,
+              )
 
-            {hasSavedTime && !isAwaitingCard && activePort === 0 && (
+              return (
+                <div
+                  key={`active-session-${port}`}
+                  className="bg-gray-900 border border-emerald-400/30 rounded-2xl p-5"
+                >
+                  <p className="text-xs font-medium uppercase tracking-wider text-emerald-300">
+                    Current Connection
+                  </p>
+                  <h2 className="mt-2 text-xl font-semibold text-white">
+                    Connected to Port {port}
+                  </h2>
+                  <p className="mt-3 text-2xl font-mono font-semibold text-emerald-200">
+                    {remaining !== undefined ? formatMs(remaining) : 'Syncing timer...'}
+                  </p>
+                  <p className="mt-2 text-sm text-gray-400">
+                    This port is assigned to your account right now. Pause it
+                    from the matching port card below if you want to save the
+                    remaining time.
+                  </p>
+                </div>
+              )
+            })}
+
+            {hasSavedTime && !isAwaitingCard && !ownsBothPorts && (
               <div className="bg-gray-900 border border-sky-400/30 rounded-2xl p-5">
                 <p className="text-xs font-medium uppercase tracking-wider text-sky-300">
                   Saved Time
@@ -616,15 +637,15 @@ function DashboardPage() {
                 statusSyncedAtMs,
                 nowMs,
               )
-              const isMyActivePort = activePort === port
+              const isMyActivePort = activePorts.includes(port)
               const canResumeHere =
                 !isActive &&
-                !hasBlockingSessionState &&
+                !isMyActivePort &&
                 hasSavedTime &&
                 isDeviceReady
               const canStartHere =
                 !isActive &&
-                !hasBlockingSessionState &&
+                !isMyActivePort &&
                 !hasSavedTime &&
                 isDeviceReady
               const canSelectHere = canStartHere || canResumeHere
@@ -698,8 +719,10 @@ function DashboardPage() {
                                     ? 'Saved time is ready. Select an available port to resume.'
                                     : isAwaitingCard
                                       ? 'Card tap is pending. Select another free port to replace the queued start request.'
-                                      : activePort !== 0
-                                        ? 'Finish or pause your current session first.'
+                                      : isMyActivePort
+                                        ? 'This port is already assigned to your account.'
+                                        : ownsBothPorts
+                                          ? 'You already occupy both charging ports.'
                                         : 'Port is available.'}
                         </p>
                       </>
@@ -728,7 +751,7 @@ function DashboardPage() {
                       <>
                         {isMyActivePort ? (
                           <button
-                            onClick={() => void handlePause()}
+                            onClick={() => void handlePause(port)}
                             disabled={actionLoading}
                             className="flex-1 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-white text-sm font-medium py-2 rounded-lg transition-colors"
                           >

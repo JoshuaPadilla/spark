@@ -139,11 +139,12 @@ export const api = {
         token,
       ),
 
-    pause: (token: string) =>
+    pause: (token: string, port: number) =>
       request<{ success: boolean }>(
         '/sessions/pause',
         {
           method: 'POST',
+          body: JSON.stringify({ port }),
         },
         token,
       ),

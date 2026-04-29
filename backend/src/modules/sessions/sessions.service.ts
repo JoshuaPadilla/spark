@@ -63,7 +63,7 @@ export class SessionsService implements OnModuleInit {
     }
 
     const user = await this.userService.findById(userId);
-    this.assertNoActiveSession(user.activePort);
+  this.assertCanClaimPort(user.activePort, port);
     this.assertNoSavedTimeConflict(user.timeRemaining);
     this.assertSufficientBalance(user.balance, cost);
     const status = this.assertDeviceReady();
@@ -88,9 +88,9 @@ export class SessionsService implements OnModuleInit {
     };
   }
 
-  async pauseSession(userId: string) {
+  async pauseSession(userId: string, requestedPort?: number) {
     const user = await this.userService.findById(userId);
-    const port = this.getActivePort(user.activePort);
+    const port = this.getOwnedPortForPause(user.activePort, requestedPort);
     await this.assertPauseOwnership(userId, port);
     const status = this.assertDeviceReady();
     this.assertPortBusy(status.availablePorts, port);
@@ -113,7 +113,7 @@ export class SessionsService implements OnModuleInit {
   async resumeSession(userId: string, port: number) {
     this.assertValidPort(port);
     const user = await this.userService.findById(userId);
-    this.assertNoActiveSession(user.activePort);
+    this.assertCanClaimPort(user.activePort, port);
 
     if (user.timeRemaining <= 0) {
       throw new BadRequestException('No paused session available to resume');
@@ -230,10 +230,10 @@ export class SessionsService implements OnModuleInit {
   ) {
     const user = await this.userService.findById(userId);
 
-    if (user.activePort === 1 || user.activePort === 2) {
+    if (this.getOwnedPorts(user.activePort).length === 2) {
       this.mqttService.sendDeviceMessage(
-        'SESSION ACTIVE',
-        `PORT ${user.activePort}`,
+        'ALL PORTS ACTIVE',
+        'WAIT FOR FREE PORT',
       );
       return;
     }
@@ -324,10 +324,10 @@ export class SessionsService implements OnModuleInit {
       return;
     }
 
-    if (user.activePort === 1 || user.activePort === 2) {
+    if (this.userOwnsPort(user.activePort, port)) {
       this.mqttService.sendDeviceMessage(
         'SESSION ACTIVE',
-        `PORT ${user.activePort}`,
+        `PORT ${port}`,
       );
       return;
     }
@@ -457,17 +457,34 @@ export class SessionsService implements OnModuleInit {
     }
   }
 
-  private assertNoActiveSession(activePort: number) {
-    if (activePort === 1 || activePort === 2) {
+  private assertCanClaimPort(activePort: number, port: number) {
+    if (this.userOwnsPort(activePort, port)) {
       throw new BadRequestException(
-        `You already have an active session on Port ${activePort}`,
+        `You already have an active session on Port ${port}`,
       );
     }
   }
 
-  private getActivePort(activePort: number) {
-    if (activePort === 1 || activePort === 2) {
-      return activePort;
+  private getOwnedPortForPause(activePort: number, requestedPort?: number) {
+    if (requestedPort === 1 || requestedPort === 2) {
+      if (this.userOwnsPort(activePort, requestedPort)) {
+        return requestedPort;
+      }
+
+      throw new BadRequestException(
+        `You do not have an active session on Port ${requestedPort}`,
+      );
+    }
+
+    const activePorts = this.getOwnedPorts(activePort);
+    if (activePorts.length === 1) {
+      return activePorts[0];
+    }
+
+    if (activePorts.length > 1) {
+      throw new BadRequestException(
+        'You have active sessions on multiple ports. Choose which port to pause.',
+      );
     }
 
     throw new BadRequestException('You do not have an active session to pause');
@@ -549,31 +566,53 @@ export class SessionsService implements OnModuleInit {
     }
 
     const user = await this.userService.findById(userId);
-    const activePort = user.activePort;
+    const activePorts = this.getOwnedPorts(user.activePort);
 
-    if (activePort !== 1 && activePort !== 2) {
+    if (activePorts.length === 0) {
       return;
     }
 
-    const portIsActive = activePort === 1 ? status.p1_active : status.p2_active;
-    if (portIsActive) {
-      return;
+    for (const activePort of activePorts) {
+      const portIsActive =
+        activePort === 1 ? status.p1_active : status.p2_active;
+      if (portIsActive) {
+        continue;
+      }
+
+      if (this.mqttService.isActivationTransitionInProgress(activePort)) {
+        continue;
+      }
+
+      if (this.mqttService.isPauseTransitionInProgress(activePort)) {
+        continue;
+      }
+
+      this.logger.warn(
+        `Clearing stale active session for user ${userId} on port ${activePort}; fresh device status reports the port is inactive.`,
+      );
+      await this.userService.clearCompletedSession(
+        userId,
+        `Session on Port ${activePort} was cleared because the charger reports that port is no longer active.`,
+        activePort,
+      );
+    }
+  }
+
+  private getOwnedPorts(activePort: number): Array<1 | 2> {
+    const ports: Array<1 | 2> = [];
+
+    if ((activePort & 1) !== 0) {
+      ports.push(1);
     }
 
-    if (this.mqttService.isActivationTransitionInProgress(activePort)) {
-      return;
+    if ((activePort & 2) !== 0) {
+      ports.push(2);
     }
 
-    if (this.mqttService.isPauseTransitionInProgress(activePort)) {
-      return;
-    }
+    return ports;
+  }
 
-    this.logger.warn(
-      `Clearing stale active session for user ${userId} on port ${activePort}; fresh device status reports the port is inactive.`,
-    );
-    await this.userService.clearCompletedSession(
-      userId,
-      `Session on Port ${activePort} was cleared because the charger reports that port is no longer active.`,
-    );
+  private userOwnsPort(activePort: number, port: number) {
+    return (activePort & port) !== 0;
   }
 }

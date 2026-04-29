@@ -43,12 +43,18 @@ export class UserService {
 
   async findByActivePort(port: number): Promise<User | null> {
     if (port !== 1 && port !== 2) return null;
-    return this.userRepo.findOne({ where: { activePort: port } });
+    return this.userRepo
+      .createQueryBuilder('user')
+      .where('(user.activePort & :portMask) != 0', { portMask: port })
+      .getOne();
   }
 
   async findUsersByActivePort(port: number): Promise<User[]> {
     if (port !== 1 && port !== 2) return [];
-    return this.userRepo.find({ where: { activePort: port } });
+    return this.userRepo
+      .createQueryBuilder('user')
+      .where('(user.activePort & :portMask) != 0', { portMask: port })
+      .getMany();
   }
 
   async create(username: string, plainPassword: string): Promise<User> {
@@ -136,22 +142,24 @@ export class UserService {
     port: number,
     message: string,
   ): Promise<User> {
+    const retainedMask = port === 1 ? 2 : 1;
+
     await this.userRepo
       .createQueryBuilder()
       .update(User)
       .set({
-        activePort: 0,
+        activePort: () => `"activePort" & ${retainedMask}`,
         pendingAction: null,
         pendingPort: 0,
         pendingDurationMs: 0,
         pendingMessage: `Session ownership on Port ${port} was reassigned to another user.`,
       })
-      .where('activePort = :port', { port })
+      .where('("activePort" & :portMask) != 0', { portMask: port })
       .andWhere('id != :userId', { userId })
       .execute();
 
     const user = await this.findById(userId);
-    user.activePort = port;
+    user.activePort = this.addPortToMask(user.activePort, port);
     user.lastPortConnected = port;
     user.timeRemaining = 0;
     user.pendingAction = null;
@@ -168,9 +176,9 @@ export class UserService {
     message: string,
   ): Promise<User> {
     const user = await this.findById(userId);
-    user.activePort = 0;
+    user.activePort = this.removePortFromMask(user.activePort, port);
     user.lastPortConnected = port;
-    user.timeRemaining = remainingMs;
+    user.timeRemaining = Math.max(0, user.timeRemaining) + Math.max(0, remainingMs);
     user.pendingAction = null;
     user.pendingPort = 0;
     user.pendingDurationMs = 0;
@@ -178,10 +186,21 @@ export class UserService {
     return this.userRepo.save(user);
   }
 
-  async clearCompletedSession(userId: string, message: string): Promise<User> {
+  async clearCompletedSession(
+    userId: string,
+    message: string,
+    port?: number,
+  ): Promise<User> {
     const user = await this.findById(userId);
-    user.activePort = 0;
-    user.timeRemaining = 0;
+
+    if (port === 1 || port === 2) {
+      user.activePort = this.removePortFromMask(user.activePort, port);
+      user.lastPortConnected = port;
+    } else {
+      user.activePort = 0;
+      user.timeRemaining = 0;
+    }
+
     user.pendingAction = null;
     user.pendingPort = 0;
     user.pendingDurationMs = 0;
@@ -201,5 +220,13 @@ export class UserService {
 
     const normalizedCardUid = cardUid.trim().toUpperCase();
     return normalizedCardUid.length > 0 ? normalizedCardUid : null;
+  }
+
+  private addPortToMask(activePort: number, port: number) {
+    return activePort | port;
+  }
+
+  private removePortFromMask(activePort: number, port: number) {
+    return activePort & ~port;
   }
 }
