@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from 'react'
 import type { User } from '../lib/api'
@@ -47,6 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(
     () => !!storedToken && !storedUser,
   )
+  const latestTokenRef = useRef<string | null>(storedToken)
 
   const persistUser = useCallback((u: User | null) => {
     if (u) {
@@ -60,6 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const clearAuth = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USER_KEY)
+    latestTokenRef.current = null
     setToken(null)
     setUser(null)
   }, [])
@@ -71,8 +74,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (t: string) => {
       try {
         const me = await api.auth.me(t)
+        // Ignore stale responses from older validations after token/account switches.
+        if (latestTokenRef.current !== t) return
         persistUser(me)
       } catch (err) {
+        if (latestTokenRef.current !== t) return
         // Only force logout when the server explicitly rejects the token
         if (
           err instanceof ApiError &&
@@ -105,8 +111,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (username: string, password: string) => {
     const { access_token } = await api.auth.login(username, password)
     localStorage.setItem(TOKEN_KEY, access_token)
+    latestTokenRef.current = access_token
     setToken(access_token)
     const me = await api.auth.me(access_token)
+    if (latestTokenRef.current !== access_token) return
     persistUser(me)
   }
 
@@ -122,6 +130,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async () => {
     if (token) await validateToken(token)
   }, [token, validateToken])
+
+  useEffect(() => {
+    latestTokenRef.current = token
+  }, [token])
 
   return (
     <AuthContext.Provider

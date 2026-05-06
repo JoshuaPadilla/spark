@@ -38,6 +38,18 @@ export class UserService {
   async findByCardUid(cardUid: string): Promise<User | null> {
     const normalizedCardUid = this.normalizeCardUid(cardUid);
     if (!normalizedCardUid) return null;
+
+    const userFromArray = await this.userRepo
+      .createQueryBuilder('user')
+      .where('user."cardUids" @> CAST(:cardUids AS jsonb)', {
+        cardUids: JSON.stringify([normalizedCardUid]),
+      })
+      .getOne();
+
+    if (userFromArray) {
+      return userFromArray;
+    }
+
     return this.userRepo.findOne({ where: { cardUid: normalizedCardUid } });
   }
 
@@ -67,6 +79,7 @@ export class UserService {
       password,
       balance: 0,
       cardUid: null,
+      cardUids: [],
       timeRemaining: 0,
       lastPortConnected: 0,
       activePort: 0,
@@ -81,23 +94,40 @@ export class UserService {
   async updateCardUid(userId: string, cardUid: string | null): Promise<User> {
     const user = await this.findById(userId);
     const normalizedCardUid = this.normalizeCardUid(cardUid);
+    const currentCards = this.getNormalizedCardUids(user);
 
     if (normalizedCardUid) {
-      const existing = await this.userRepo.findOne({
-        where: { cardUid: normalizedCardUid },
-      });
+      const existing = await this.userRepo
+        .createQueryBuilder('user')
+        .where('user.id != :userId', { userId })
+        .andWhere(
+          '(user."cardUid" = :cardUid OR user."cardUids" @> CAST(:cardUids AS jsonb))',
+          {
+            cardUid: normalizedCardUid,
+            cardUids: JSON.stringify([normalizedCardUid]),
+          },
+        )
+        .getOne();
 
-      if (existing && existing.id !== userId) {
+      if (existing) {
         throw new ConflictException(
           'Card UID is already linked to another user',
         );
       }
+
+      if (!currentCards.includes(normalizedCardUid)) {
+        currentCards.push(normalizedCardUid);
+      }
+
+      user.cardUids = currentCards;
+      user.cardUid = currentCards[0] ?? normalizedCardUid;
+      user.pendingMessage = `Card ${normalizedCardUid} linked successfully. ${currentCards.length} linked card(s) on your account.`;
+      return this.userRepo.save(user);
     }
 
-    user.cardUid = normalizedCardUid;
-    user.pendingMessage = normalizedCardUid
-      ? `Card ${normalizedCardUid} linked successfully.`
-      : 'Card UID removed.';
+    user.cardUid = null;
+    user.cardUids = [];
+    user.pendingMessage = 'All linked card UIDs were removed.';
     return this.userRepo.save(user);
   }
 
@@ -219,8 +249,28 @@ export class UserService {
   private normalizeCardUid(cardUid: string | null | undefined): string | null {
     if (typeof cardUid !== 'string') return null;
 
-    const normalizedCardUid = cardUid.trim().toUpperCase();
+    const normalizedCardUid = cardUid.trim().replace(/\s+/g, '').toUpperCase();
     return normalizedCardUid.length > 0 ? normalizedCardUid : null;
+  }
+
+  private getNormalizedCardUids(user: User): string[] {
+    const cards = new Set<string>();
+
+    if (Array.isArray(user.cardUids)) {
+      for (const card of user.cardUids) {
+        const normalized = this.normalizeCardUid(card);
+        if (normalized) {
+          cards.add(normalized);
+        }
+      }
+    }
+
+    const primaryCard = this.normalizeCardUid(user.cardUid);
+    if (primaryCard) {
+      cards.add(primaryCard);
+    }
+
+    return [...cards];
   }
 
   private addPortToMask(activePort: number, port: number) {

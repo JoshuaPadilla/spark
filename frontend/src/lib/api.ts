@@ -5,6 +5,7 @@ export interface User {
   username: string
   balance: number
   cardUid: string | null
+  cardUids?: string[]
   timeRemaining: number
   lastPortConnected: number
   activePort: number

@@ -19,6 +19,9 @@ export class User {
   @Column({ type: 'varchar', length: 64, unique: true, nullable: true })
   cardUid!: string | null;
 
+  @Column({ type: 'jsonb', default: () => "'[]'", nullable: false })
+  cardUids!: string[];
+
   @Column({ type: 'int', default: 0 })
   timeRemaining!: number;
 

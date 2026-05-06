@@ -130,8 +130,8 @@ function DashboardPage() {
   }, [isAuthenticated, isLoading, navigate])
 
   useEffect(() => {
-    setCardUid(user?.cardUid ?? '')
-  }, [user?.cardUid])
+    setCardUid('')
+  }, [user?.cardUid, user?.cardUids])
 
   useEffect(() => {
     if (!token) return
@@ -295,14 +295,38 @@ function DashboardPage() {
 
   const handleCardSave = async () => {
     if (!token) return
+    const normalizedCardUid = cardUid.trim().replace(/\s+/g, '').toUpperCase()
+    if (!normalizedCardUid) {
+      setActionError('Please enter a card UID to link.')
+      return
+    }
+
     setActionError('')
     setCardLoading(true)
     try {
-      await api.users.updateCard(token, cardUid)
+      await api.users.updateCard(token, normalizedCardUid)
       await refreshUser()
+      setCardUid('')
     } catch (e) {
       setActionError(
         e instanceof Error ? e.message : 'Failed to update card UID',
+      )
+    } finally {
+      setCardLoading(false)
+    }
+  }
+
+  const handleClearCards = async () => {
+    if (!token) return
+    setActionError('')
+    setCardLoading(true)
+    try {
+      await api.users.updateCard(token, '')
+      await refreshUser()
+      setCardUid('')
+    } catch (e) {
+      setActionError(
+        e instanceof Error ? e.message : 'Failed to clear linked cards',
       )
     } finally {
       setCardLoading(false)
@@ -323,6 +347,12 @@ function DashboardPage() {
 
   const hasActivePorts = activePorts.length > 0
   const ownsBothPorts = activePorts.length === 2
+  const linkedCards =
+    user.cardUids && user.cardUids.length > 0
+      ? user.cardUids
+      : user.cardUid
+        ? [user.cardUid]
+        : []
   const selectedDuration =
     DURATIONS.find((option) => option.minutes === sessionModal.minutes) ??
     DURATIONS[0]
@@ -406,8 +436,15 @@ function DashboardPage() {
             <div>
               <p className="text-sm text-gray-400 mb-1">Linked RFID Card</p>
               <p className="text-lg font-semibold text-white">
-                {user.cardUid ?? 'No card linked yet'}
+                {linkedCards.length > 0
+                  ? `${linkedCards.length} linked card${linkedCards.length > 1 ? 's' : ''}`
+                  : 'No card linked yet'}
               </p>
+              {linkedCards.length > 0 && (
+                <p className="text-sm text-gray-300 mt-2 break-all">
+                  {linkedCards.join(' · ')}
+                </p>
+              )}
               <p className="text-sm text-gray-500 mt-1">
                 Link the card UID you will use only for device-initiated
                 sessions. Dashboard starts and resumes use your logged-in
@@ -417,12 +454,14 @@ function DashboardPage() {
             </div>
             <span
               className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-                user.cardUid
+                linkedCards.length > 0
                   ? 'bg-emerald-400/15 text-emerald-300'
                   : 'bg-gray-800 text-gray-400'
               }`}
             >
-              {user.cardUid ? 'Card Linked' : 'Card Needed'}
+              {linkedCards.length > 0
+                ? `${linkedCards.length} Linked`
+                : 'Card Needed'}
             </span>
           </div>
 
@@ -439,7 +478,14 @@ function DashboardPage() {
               disabled={cardLoading}
               className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
             >
-              {cardLoading ? 'Saving…' : 'Save Card UID'}
+              {cardLoading ? 'Saving…' : 'Link Card UID'}
+            </button>
+            <button
+              onClick={() => void handleClearCards()}
+              disabled={cardLoading || linkedCards.length === 0}
+              className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+            >
+              Clear Linked Cards
             </button>
           </div>
         </div>
@@ -893,7 +939,7 @@ function DashboardPage() {
                 Accepted Card
               </p>
               <p className="mt-2 text-lg font-semibold text-amber-100">
-                {user.cardUid ?? 'No linked card'}
+                {linkedCards[0] ?? 'No linked card'}
               </p>
               <p className="mt-2 text-sm text-amber-100/80">
                 Other users cannot use their cards to start this queued session.
