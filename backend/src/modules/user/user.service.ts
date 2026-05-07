@@ -41,7 +41,7 @@ export class UserService {
 
     const userFromArray = await this.userRepo
       .createQueryBuilder('user')
-      .where('user."cardUids" @> CAST(:cardUids AS jsonb)', {
+      .where('"user"."cardUids" @> CAST(:cardUids AS jsonb)', {
         cardUids: JSON.stringify([normalizedCardUid]),
       })
       .getOne();
@@ -57,7 +57,7 @@ export class UserService {
     if (port !== 1 && port !== 2) return null;
     return this.userRepo
       .createQueryBuilder('user')
-      .where('(user.activePort & :portMask) != 0', { portMask: port })
+      .where('("user"."activePort" & :portMask) != 0', { portMask: port })
       .getOne();
   }
 
@@ -65,7 +65,7 @@ export class UserService {
     if (port !== 1 && port !== 2) return [];
     return this.userRepo
       .createQueryBuilder('user')
-      .where('(user.activePort & :portMask) != 0', { portMask: port })
+      .where('("user"."activePort" & :portMask) != 0', { portMask: port })
       .getMany();
   }
 
@@ -99,9 +99,9 @@ export class UserService {
     if (normalizedCardUid) {
       const existing = await this.userRepo
         .createQueryBuilder('user')
-        .where('user.id != :userId', { userId })
+        .where('"user".id != :userId', { userId })
         .andWhere(
-          '(user."cardUid" = :cardUid OR user."cardUids" @> CAST(:cardUids AS jsonb))',
+          '("user"."cardUid" = :cardUid OR "user"."cardUids" @> CAST(:cardUids AS jsonb))',
           {
             cardUid: normalizedCardUid,
             cardUids: JSON.stringify([normalizedCardUid]),
