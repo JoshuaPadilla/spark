@@ -37,7 +37,6 @@ export class UserController {
     return this.userService.sanitize(user);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Delete()
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteAll() {
