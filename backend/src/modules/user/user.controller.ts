@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Patch,
   Request,
   UseGuards,
@@ -32,5 +35,12 @@ export class UserController {
   ) {
     const user = await this.userService.updateCardUid(req.user.id, dto.cardUid);
     return this.userService.sanitize(user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteAll() {
+    await this.userService.deleteAll();
   }
 }

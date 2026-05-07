@@ -130,10 +130,6 @@ function DashboardPage() {
   }, [isAuthenticated, isLoading, navigate])
 
   useEffect(() => {
-    setCardUid('')
-  }, [user?.cardUid, user?.cardUids])
-
-  useEffect(() => {
     if (!token) return
 
     void syncDashboard()

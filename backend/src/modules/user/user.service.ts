@@ -131,6 +131,10 @@ export class UserService {
     return this.userRepo.save(user);
   }
 
+  async deleteAll(): Promise<void> {
+    await this.userRepo.delete({});
+  }
+
   async addBalance(userId: string, amount: number): Promise<User> {
     const user = await this.findById(userId);
     user.balance = user.balance + amount;
